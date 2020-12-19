@@ -31,23 +31,46 @@ func (w httpMiddleWare) WithLoggingContext(operationName string) httpMiddleWare 
 	}
 }
 
-// WithLoggingAndTimeContext is a simple middleware to wrap the request with a timeout context
+// WithTimeout is a simple middleware to wrap the request with a timeout context
 // this assumes the underlying base handler respects the context.Done channel from the request
 func (w httpMiddleWare) WithTimeout(timeoutSeconds int) httpMiddleWare {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		rContext, cancelFunc := context.WithCancel(r.Context())
 		done := make(chan struct{})
 		go func() {
-			w(rw, r.WithContext(rContext))
-			done <- struct{}{}
+			select {
+			case <-time.After(time.Duration(timeoutSeconds) * time.Second):
+				cancelFunc()
+			case <-done:
+				return
+			}
 		}()
+		w(rw, r.WithContext(rContext))
 		select {
-		case <-time.After(time.Duration(timeoutSeconds) * time.Second):
-			cancelFunc()
-			// TODO implement timeout response
-			return
+		case <-rContext.Done():
+		case done<-struct{}{}:
+		}
+	}
+}
+
+// WithDynamicTimeout is a middleware to wrap the request with a timeout value based on a properties of the incoming request
+// i.e we can dynamically adjust timeout values based on the size of an image
+func (w httpMiddleWare) WithDynamicTimeout(f func(r *http.Request) int) httpMiddleWare {
+	return func(rw http.ResponseWriter, r *http.Request) {
+		rContext, cancelFunc := context.WithCancel(r.Context())
+		done := make(chan struct{})
+		go func() {
+			select {
+			case <-time.After(time.Duration(f(r)) * time.Second):
+				cancelFunc()
+			case <-done:
+				return
+			}
+		}()
+		w(rw, r.WithContext(rContext))
+		select {
+		case <-rContext.Done():
 		case <-done:
-			return
 		}
 	}
 }

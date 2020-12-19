@@ -57,7 +57,7 @@ func (s *appServer) buildRouter() {
 
 	router.HandleFunc(baseURL, s.newImageBaseHandler().
 		WithLoggingContext("newImageHandler").
-		WithTimeout(120)).
+		WithDynamicTimeout(s.dynamicTimeoutFunc)).
 		Methods("POST")
 
 	router.HandleFunc(baseURL, s.getImageListBaseHandler().
@@ -77,12 +77,24 @@ func (s *appServer) buildRouter() {
 	}).Methods("GET")
 }
 
+func (s *appServer) dynamicTimeoutFunc(r *http.Request) int {
+	// this could be a bad idea :)
+	// i.e if this service runs through any type of layer2/3 router/lb then we'd have to worry about things like tcp-reset
+	return 1000
+}
+
 func (s *appServer) newImageBaseHandler() httpMiddleWare {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		baseResponse := models.Response{
 			CorrelationID: s.tryGetCorrelationID(r.Context()),
 		}
-		uid, err := s.service.NewASCIIImage(r.Context(), r.Body)
+		var uid *uuid.UUID
+		var err error
+		if r.Header.Get("async") == "true" {
+			uid, err = s.service.NewASCIIImageAsync(r.Context(), r.Body)
+		} else {
+			uid, err = s.service.NewASCIIImageSync(r.Context(), r.Body)
+		}
 		if err != nil {
 			s.writeErrorResponse(err, rw, baseResponse)
 		} else if uid == nil {
@@ -109,7 +121,7 @@ func (s *appServer) getImageBaseHandler() httpMiddleWare {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return
 		}
-		image, err := s.service.GetASCIIImage(r.Context(), imageUID)
+		_, image, err := s.service.GetASCIIImage(r.Context(), imageUID)
 		if err != nil {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return

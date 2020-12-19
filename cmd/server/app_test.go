@@ -14,19 +14,26 @@ import (
 var _ ASCIIImageService = (*ASCIIImageServiceMock)(nil)
 
 type ASCIIImageServiceMock struct {
-	GetASCIIImageFn    func() ([]byte, error)
+	GetASCIIImageFn    func() (bool, []byte, error)
 	GetNewASCIIImageFn func() (*uuid.UUID, error)
 	GetImageListFn     func() ([]uuid.UUID, error)
 }
 
-func (A ASCIIImageServiceMock) GetASCIIImage(_ context.Context, _ uuid.UUID) ([]byte, error) {
+func (A ASCIIImageServiceMock) GetASCIIImage(_ context.Context, _ uuid.UUID) (bool, []byte, error) {
 	if A.GetASCIIImageFn == nil {
-		return nil, nil
+		return false, nil, nil
 	}
 	return A.GetASCIIImageFn()
 }
 
-func (A ASCIIImageServiceMock) NewASCIIImage(_ context.Context, _ io.ReadCloser) (*uuid.UUID, error) {
+func (A ASCIIImageServiceMock) NewASCIIImageAsync(_ context.Context, _ io.ReadCloser) (*uuid.UUID, error) {
+	if A.GetNewASCIIImageFn == nil {
+		return nil, nil
+	}
+	return A.GetNewASCIIImageFn()
+}
+
+func (A ASCIIImageServiceMock) NewASCIIImageSync(_ context.Context, _ io.ReadCloser) (*uuid.UUID, error) {
 	if A.GetNewASCIIImageFn == nil {
 		return nil, nil
 	}
@@ -64,8 +71,8 @@ func TestGetASCIIImageHandler_ServiceFails(t *testing.T) {
 	}
 
 	mockService := &ASCIIImageServiceMock{}
-	mockService.GetASCIIImageFn = func() ([]byte, error) {
-		return nil, errors.New("some error")
+	mockService.GetASCIIImageFn = func() (bool, []byte, error) {
+		return false, nil, errors.New("some error")
 	}
 	testSubject := BuildServer(mockService, 8080)
 	rr := httptest.NewRecorder()

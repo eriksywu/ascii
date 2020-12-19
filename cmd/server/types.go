@@ -7,7 +7,8 @@ import (
 )
 
 type ASCIIImageService interface {
-	GetASCIIImage(context.Context, uuid.UUID) ([]byte, error)
-	NewASCIIImage(context.Context, io.ReadCloser) (*uuid.UUID, error)
+	GetASCIIImage(context.Context, uuid.UUID) (bool, []byte, error)
+	NewASCIIImageAsync(context.Context, io.ReadCloser) (*uuid.UUID, error)
+	NewASCIIImageSync(context.Context, io.ReadCloser) (*uuid.UUID, error)
 	GetImageList(context.Context) ([]uuid.UUID, error)
 }
