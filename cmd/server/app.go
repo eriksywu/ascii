@@ -3,6 +3,9 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"github.com/eriksywu/ascii/pkg/image"
 	"github.com/eriksywu/ascii/pkg/logging"
 	"github.com/eriksywu/ascii/pkg/models"
 	"github.com/google/uuid"
@@ -11,7 +14,7 @@ import (
 	"strconv"
 )
 
-// singleton instance of the ascii app server
+// singleton instance of the ascii image server
 var server *appServer
 
 const baseURL = "/images"
@@ -79,9 +82,11 @@ func (s *appServer) newImageBaseHandler() httpMiddleWare {
 		baseResponse := models.Response{
 			CorrelationID: s.tryGetCorrelationID(r.Context()),
 		}
-		uid, err := s.service.NewASCIIImage(r.Body)
+		uid, err := s.service.NewASCIIImage(r.Context(), r.Body)
 		if err != nil {
 			s.writeErrorResponse(err, rw, baseResponse)
+		} else if uid == nil {
+			s.writeErrorResponse(fmt.Errorf("internal error: could not generate uuid"), rw, baseResponse)
 		} else {
 			response := models.NewImageResponse{
 				Response: baseResponse,
@@ -104,7 +109,7 @@ func (s *appServer) getImageBaseHandler() httpMiddleWare {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return
 		}
-		image, err := s.service.GetASCIIImage(imageUID)
+		image, err := s.service.GetASCIIImage(r.Context(), imageUID)
 		if err != nil {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return
@@ -123,7 +128,7 @@ func (s *appServer) getImageListBaseHandler() httpMiddleWare {
 		baseResponse := models.Response{
 			CorrelationID: s.tryGetCorrelationID(r.Context()),
 		}
-		imageIDList, err := s.service.GetImageList()
+		imageIDList, err := s.service.GetImageList(r.Context())
 		if err != nil {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return
@@ -143,7 +148,11 @@ func (s *appServer) getImageListBaseHandler() httpMiddleWare {
 
 // TODO implement
 func (s *appServer) writeErrorResponse(err error, rw http.ResponseWriter, baseResponse models.Response) {
-	rw.WriteHeader(http.StatusBadRequest)
+	if errors.Is(err, image.InternalProcessingError{}) {
+		rw.WriteHeader(http.StatusInternalServerError)
+	} else {
+		rw.WriteHeader(http.StatusBadRequest)
+	}
 }
 
 func (s *appServer) tryGetCorrelationID(context context.Context) string {

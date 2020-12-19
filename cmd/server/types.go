@@ -1,12 +1,13 @@
 package server
 
 import (
+	"context"
 	"github.com/google/uuid"
 	"io"
 )
 
 type ASCIIImageService interface {
-	GetASCIIImage(id uuid.UUID) ([]byte, error)
-	NewASCIIImage(r io.ReadCloser) (uuid.UUID, error)
-	GetImageList() ([]uuid.UUID, error)
+	GetASCIIImage(context.Context, uuid.UUID) ([]byte, error)
+	NewASCIIImage(context.Context, io.ReadCloser) (*uuid.UUID, error)
+	GetImageList(context.Context) ([]uuid.UUID, error)
 }

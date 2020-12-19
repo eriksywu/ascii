@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -14,25 +15,25 @@ var _ ASCIIImageService = (*ASCIIImageServiceMock)(nil)
 
 type ASCIIImageServiceMock struct {
 	GetASCIIImageFn    func() ([]byte, error)
-	GetNewASCIIImageFn func() (uuid.UUID, error)
+	GetNewASCIIImageFn func() (*uuid.UUID, error)
 	GetImageListFn     func() ([]uuid.UUID, error)
 }
 
-func (A ASCIIImageServiceMock) GetASCIIImage(id uuid.UUID) ([]byte, error) {
+func (A ASCIIImageServiceMock) GetASCIIImage(_ context.Context, _ uuid.UUID) ([]byte, error) {
 	if A.GetASCIIImageFn == nil {
 		return nil, nil
 	}
 	return A.GetASCIIImageFn()
 }
 
-func (A ASCIIImageServiceMock) NewASCIIImage(r io.ReadCloser) (uuid.UUID, error) {
+func (A ASCIIImageServiceMock) NewASCIIImage(_ context.Context, _ io.ReadCloser) (*uuid.UUID, error) {
 	if A.GetNewASCIIImageFn == nil {
-		return uuid.New(), nil
+		return nil, nil
 	}
 	return A.GetNewASCIIImageFn()
 }
 
-func (A ASCIIImageServiceMock) GetImageList() ([]uuid.UUID, error) {
+func (A ASCIIImageServiceMock) GetImageList(_ context.Context) ([]uuid.UUID, error) {
 	if A.GetImageListFn == nil {
 		return nil, nil
 	}

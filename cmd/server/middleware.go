@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// decorate the existing HandlerFunc with our own middleware on-top of base request handlers for app logic
+// decorate the existing HandlerFunc with our own middleware on-top of base request handlers for image logic
 type httpMiddleWare http.HandlerFunc
 
 const (
