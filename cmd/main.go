@@ -2,6 +2,4 @@ package cmd
 
 func main() {
 
-
-
 }

@@ -7,5 +7,6 @@ import (
 
 type ASCIIImageService interface {
 	GetASCIIImage(id uuid.UUID) ([]byte, error)
-	NewASCIIImage(r io.ByteReader) (uuid.UUID, error)
+	NewASCIIImage(r io.ReadCloser) (uuid.UUID, error)
+	GetImageList() ([]uuid.UUID, error)
 }
