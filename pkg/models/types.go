@@ -17,6 +17,7 @@ type NewImageResponse struct {
 type GetImageResponse struct {
 	Response
 	ASCIIValue string
+	Finished bool
 }
 
 type GetImageListResponse struct {

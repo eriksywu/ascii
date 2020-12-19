@@ -1,8 +1,9 @@
 package logging
 
 import (
-	"context"
 	"github.com/sirupsen/logrus"
+	"io"
+	"os"
 )
 
 var Logger *StandardEventLogger
@@ -12,29 +13,22 @@ func init() {
 }
 
 const (
-	CorrelationID = "correlationID"
-	OperationName = "OperationName"
+	logFilePath = "ascii.log"
 )
 
 type StandardEventLogger struct {
 	*logrus.Logger
 }
 
-func GetLogEntry(context context.Context, logger *StandardEventLogger) *logrus.Entry {
-	entry := logrus.NewEntry(logger.Logger)
-	correlationID := context.Value(CorrelationID)
-	if correlationID != nil {
-		entry.WithField(CorrelationID, correlationID)
-	}
-	operationName := context.Value(OperationName)
-	if operationName != nil {
-		entry.WithField(OperationName, operationName)
-	}
-	return entry
-}
-
 func NewLogger() *StandardEventLogger {
 	logrusLogger := logrus.New()
+	if _, err := os.Stat(logFilePath); os.IsNotExist(err) {
+		os.Create(logFilePath)
+	}
+	if logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_WRONLY, os.ModeAppend); err == nil {
+		muxWriter := io.MultiWriter(os.Stdout, logFile)
+		logrusLogger.SetOutput(muxWriter)
+	}
 	logrusLogger.Formatter = &logrus.JSONFormatter{}
 	logger := &StandardEventLogger{
 		Logger: logrusLogger,

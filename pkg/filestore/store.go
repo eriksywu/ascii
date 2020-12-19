@@ -39,18 +39,23 @@ func (f FileStore) PushASCIIImage(asciiImage string, id uuid.UUID) error {
 	return nil
 }
 
-func (f FileStore) GetASCIIImage(id uuid.UUID) (string, error) {
+func (f FileStore) GetASCIIImage(id uuid.UUID) (bool, string, error) {
 	targetFile := filepath.Join(f.rootPath, id.String())
+	if _, err := os.Stat(targetFile); os.IsNotExist(err) {
+		return false, "", nil
+	} else if err != nil {
+		return false, "", err
+	}
 	file, err := os.Open(targetFile)
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
 	var content []byte
 	_, err = file.Read(content)
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
-	return string(content), nil
+	return true, string(content), nil
 }
 
 func (f FileStore) ListASCIIImages() ([]uuid.UUID, error) {

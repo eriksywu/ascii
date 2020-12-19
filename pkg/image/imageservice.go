@@ -12,8 +12,13 @@ import (
 	"io"
 )
 
+// local interface for ImageConverter for mocking
+type ImageConverter interface {
+	Image2ASCIIString(image.Image, *convert.Options) string
+}
+
 type Service struct {
-	imageConverter *convert.ImageConverter
+	imageConverter ImageConverter
 	imageStore     ImageStore
 
 	//asyncTasks stores all currently running image processing tasks
@@ -29,7 +34,7 @@ func NewService(imageStore ImageStore) *Service {
 	return service
 }
 
-func (i *Service) NewASCIIImageAsync(ctx context.Context, r io.ReadCloser) (*uuid.UUID, error) {
+func (i *Service) NewASCIIImageAsync(_ context.Context, r io.ReadCloser) (*uuid.UUID, error) {
 	id := uuid.New()
 	// construct a new context that's not tied to the request context to decouple this async op from the request's cancelFunc
 	// but copy over context data?
@@ -111,9 +116,12 @@ func (i *Service) GetASCIIImage(ctx context.Context, id uuid.UUID) (bool, []byte
 			return false, nil, InternalProcessingError{fmt.Errorf("image processing failed/cancelled")}
 		}
 	}
-	image, err := i.imageStore.GetASCIIImage(id)
+	exists, image, err := i.imageStore.GetASCIIImage(id)
 	if err != nil {
-		return true, nil, err
+		return false, nil, err
+	}
+	if !exists {
+		return false, nil, NewResourceNotFoundError(fmt.Errorf("image %s does not exist", id.String()))
 	}
 	return true, []byte(image), nil
 }

@@ -29,8 +29,6 @@ type appServer struct {
 	logger  *logging.StandardEventLogger
 }
 
-// Portions of skeleton http/router setup code was lifted from my own personal project
-// https://github.com/eriksywu/yamlr/blob/master/server/server.go
 func BuildServer(service ASCIIImageService, port int) *appServer {
 	if server == nil {
 		server = &appServer{
@@ -121,7 +119,7 @@ func (s *appServer) getImageBaseHandler() httpMiddleWare {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return
 		}
-		_, image, err := s.service.GetASCIIImage(r.Context(), imageUID)
+		finished, image, err := s.service.GetASCIIImage(r.Context(), imageUID)
 		if err != nil {
 			s.writeErrorResponse(err, rw, baseResponse)
 			return
@@ -129,6 +127,7 @@ func (s *appServer) getImageBaseHandler() httpMiddleWare {
 		response := models.GetImageResponse{
 			Response:   baseResponse,
 			ASCIIValue: string(image),
+			Finished:   finished,
 		}
 		responseBody, _ := json.Marshal(response)
 		rw.Write([]byte(responseBody))
@@ -158,13 +157,17 @@ func (s *appServer) getImageListBaseHandler() httpMiddleWare {
 	}
 }
 
-// TODO implement
 func (s *appServer) writeErrorResponse(err error, rw http.ResponseWriter, baseResponse models.Response) {
 	if errors.Is(err, image.InternalProcessingError{}) {
 		rw.WriteHeader(http.StatusInternalServerError)
+	} else if errors.Is(err, image.ResourceNotFoundError{}) {
+		rw.WriteHeader(http.StatusNotFound)
 	} else {
 		rw.WriteHeader(http.StatusBadRequest)
 	}
+	response := models.ErrorResponse{Response: baseResponse, ErrorMessage: err.Error()}
+	responseBody, _ := json.Marshal(response)
+	rw.Write(responseBody)
 }
 
 func (s *appServer) tryGetCorrelationID(context context.Context) string {
