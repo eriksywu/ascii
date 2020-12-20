@@ -4,6 +4,7 @@ go 1.15
 
 require (
 	github.com/aybabtme/rgbterm v0.0.0-20170906152045-cc83f3b3ce59 // indirect
+	github.com/banzaicloud/logrus-runtime-formatter v0.0.0-20190729070250-5ae5475bae5e
 	github.com/eriksywu/go-async v0.0.1-test
 	github.com/google/uuid v1.1.2
 	github.com/gorilla/mux v1.8.0

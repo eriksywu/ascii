@@ -1,8 +1,10 @@
 package image
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/eriksywu/ascii/pkg/logging"
 	async "github.com/eriksywu/go-async"
 	"github.com/google/uuid"
 	"github.com/qeesung/image2ascii/convert"
@@ -10,19 +12,16 @@ import (
 	"image"
 	_ "image/png" // register png decoder
 	"io"
+	"io/ioutil"
 )
 
-// local interface for ImageConverter for mocking
-type ImageConverter interface {
-	Image2ASCIIString(image.Image, *convert.Options) string
-}
 
 type Service struct {
-	imageConverter ImageConverter
+	imageConverter *convert.ImageConverter
 	imageStore     ImageStore
 
 	//asyncTasks stores all currently running image processing tasks
-	//Shameless plug: using my own go-async pkg here :)
+	//Shameless plug: using my own go-async pkg here
 	//TODO thread safety
 	asyncTasks map[uuid.UUID]*async.Task
 }
@@ -34,34 +33,44 @@ func NewService(imageStore ImageStore) *Service {
 	return service
 }
 
-func (i *Service) NewASCIIImageAsync(_ context.Context, r io.ReadCloser) (*uuid.UUID, error) {
+func (i *Service) NewASCIIImageAsync(ctx context.Context, r io.ReadCloser) (*uuid.UUID, error) {
 	id := uuid.New()
 	// construct a new context that's not tied to the request context to decouple this async op from the request's cancelFunc
-	// but copy over context data?
-	asyncContext := context.Background()
-	_ = i.createAndPushNewConversionTask(asyncContext , r, id)
-	return &id, nil
-}
-
-func (i *Service) NewASCIIImageSync(ctx context.Context, r io.ReadCloser) (*uuid.UUID, error) {
-	id := uuid.New()
-	task := i.createAndPushNewConversionTask(ctx , r, id)
-	_, err := task.Result()
+	// but copy over context-based logger
+	asyncContext := context.WithValue(context.Background(), "logger", getLogger(ctx))
+	// input ReadCloser will be auto-closed at the end of the httphandlefunc. We need to copy it.
+	rCopyBytes, err := ioutil.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	newRW :=  ioutil.NopCloser(bytes.NewBuffer(rCopyBytes))
+	err = i.createAndPushNewConversionTask(asyncContext, newRW, id).RunAsync()
 	if err != nil {
 		return nil, err
 	}
 	return &id, nil
 }
 
+func (i *Service) NewASCIIImageSync(ctx context.Context, r io.ReadCloser) (*uuid.UUID, error) {
+	id := uuid.New()
+	task := i.createAndPushNewConversionTask(ctx, r, id)
+	result, err := task.Result()
+	if err != nil {
+		return nil, err
+	}
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return &id, nil
+}
+
 func (i *Service) createAndPushNewConversionTask(ctx context.Context, r io.ReadCloser, id uuid.UUID) *async.Task {
 	worker := func(_ context.Context) (async.T, error) {
-		defer delete(i.asyncTasks, id)
 		logger := getLogger(ctx)
 
 		// check if context is closed at every step
 		if isContextCancelled(ctx) {
 			return nil, InternalProcessingError{fmt.Errorf("context cancelled")}
-
 		}
 
 		// step1. decode png
@@ -69,7 +78,8 @@ func (i *Service) createAndPushNewConversionTask(ctx context.Context, r io.ReadC
 		defer r.Close()
 		m, _, err := image.Decode(r)
 		if err != nil {
-			return nil, fmt.Errorf("error processing png image: %w", NewInternalProcessingError(err))
+			logger.Errorf("decoding image failed: %s", err)
+			return nil, fmt.Errorf("error processing png image: %w", ImageProcessingError)
 		}
 
 		if isContextCancelled(ctx) {
@@ -78,24 +88,29 @@ func (i *Service) createAndPushNewConversionTask(ctx context.Context, r io.ReadC
 
 		// step2: convert to ascii string
 		logger.Infof("converting image %s to ascii", id)
-		image := i.imageConverter.Image2ASCIIString(m, &convert.DefaultOptions)
+		convertOpts := convert.Options{
+			Ratio:       1,
+			FixedWidth:  -1,
+			FixedHeight: -1,
+			FitScreen:   false,
+		}
+		image := i.imageConverter.Image2ASCIIString(m, &convertOpts)
 
 		if isContextCancelled(ctx) {
 			return nil, InternalProcessingError{fmt.Errorf("context cancelled")}
-
 		}
 
 		// step3: push to image store
 		logger.Infof("storing image %s", id)
 		err = i.imageStore.PushASCIIImage(image, id)
 		if err != nil {
-			return nil, fmt.Errorf("error storing ascii image: %w", NewInternalProcessingError(err))
+			logger.Errorf("saving image failed: %s", err)
+			return nil, fmt.Errorf("error storing ascii image: %w", ImageStorageError)
 		}
 
 		// step4: remove self from the asyncTask map
 		logger.Infof("processing successful")
-
-
+		delete(i.asyncTasks, id)
 		return id, nil
 	}
 
@@ -105,24 +120,37 @@ func (i *Service) createAndPushNewConversionTask(ctx context.Context, r io.ReadC
 }
 
 func (i *Service) GetASCIIImage(ctx context.Context, id uuid.UUID) (bool, []byte, error) {
+	logger := getLogger(ctx)
+	logger.Infof("attempting to fetch ascii image for imageID = %s", id)
 	processingTask, k := i.asyncTasks[id]
 	// if processing task is still running
 	if k {
+		logger.Infof("image has not yet finished processing")
 		status := processingTask.State()
 		if status.IsRunning() {
 			return false, nil, nil
 		}
+		result, taskErr := processingTask.Result()
+		if taskErr != nil {
+			return false, nil, InternalProcessingError{fmt.Errorf("internal application processing failed: %w", taskErr)}
+		}
+		if result.Error != nil {
+			return false, nil, InternalProcessingError{fmt.Errorf("image processing failed: %w", result.Error)}
+		}
 		if status == async.Cancelled || status == async.InternalError || status == async.Cancelling {
-			return false, nil, InternalProcessingError{fmt.Errorf("image processing failed/cancelled")}
+			return false, nil, InternalProcessingError{fmt.Errorf("unknown image processing failed/cancelled")}
 		}
 	}
+	logger.Infof("grabbing image from image store")
 	exists, image, err := i.imageStore.GetASCIIImage(id)
 	if err != nil {
 		return false, nil, err
 	}
 	if !exists {
+		logger.Warnf("image %s does not exist", id)
 		return false, nil, NewResourceNotFoundError(fmt.Errorf("image %s does not exist", id.String()))
 	}
+	logger.Infof("found image from image store")
 	return true, []byte(image), nil
 }
 
@@ -143,9 +171,7 @@ func isContextCancelled(ctx context.Context) bool {
 func getLogger(ctx context.Context) *logrus.Entry {
 	logger := ctx.Value("logger")
 	if logger == nil || logger.(*logrus.Entry) == nil {
-		return &logrus.Entry{}
+		return logrus.NewEntry(logging.Logger.Logger)
 	}
 	return logger.(*logrus.Entry)
 }
-
-

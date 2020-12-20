@@ -1,26 +1,20 @@
 package models
 
-type Response struct {
+type ErrorResponse struct {
+	ErrorMessage  string
 	CorrelationID string
 }
 
-type ErrorResponse struct {
-	Response
-	ErrorMessage string
-}
-
 type NewImageResponse struct {
-	Response
 	ImageID string
 }
 
 type GetImageResponse struct {
-	Response
-	ASCIIValue string
-	Finished bool
+	ASCIIValue   string
+	Finished     bool
+	ErrorMessage string
 }
 
 type GetImageListResponse struct {
-	Response
 	ImageIDList []string
 }

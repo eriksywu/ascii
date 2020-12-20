@@ -36,19 +36,18 @@ func BuildServer(service ASCIIImageService, port int) *appServer {
 			logger:  logging.Logger,
 			service: service,
 		}
-		server.buildRouter()
+		buildRouter(server)
 	}
 	return server
 }
 
 func (s *appServer) Run() {
 	p := strconv.Itoa(s.port)
-	s.logger.Println("Starting service...")
+	s.logger.Printf("Starting service on port %d" , s.port)
 	s.logger.Fatal(http.ListenAndServe(":"+p, s.router))
 }
 
-// TODO: pass in builder opts to specify which middleware to use?
-func (s *appServer) buildRouter() {
+func buildRouter (s *appServer) {
 	s.logger.Println("registering handlers routes")
 
 	router := mux.NewRouter()
@@ -71,8 +70,11 @@ func (s *appServer) buildRouter() {
 	// Health is contextless
 	// Typically timeouts for health checks are specified on the client side (i.e HTTPProbe on K8S)
 	router.HandleFunc("/health", func(writer http.ResponseWriter, request *http.Request) {
-		writer.WriteHeader(200)
+		s.logger.Println("received health check request")
+		writer.Write([]byte("running"))
 	}).Methods("GET")
+
+	s.router = router
 }
 
 func (s *appServer) dynamicTimeoutFunc(r *http.Request) int {
@@ -83,9 +85,6 @@ func (s *appServer) dynamicTimeoutFunc(r *http.Request) int {
 
 func (s *appServer) newImageBaseHandler() httpMiddleWare {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		baseResponse := models.Response{
-			CorrelationID: s.tryGetCorrelationID(r.Context()),
-		}
 		var uid *uuid.UUID
 		var err error
 		if r.Header.Get("async") == "true" {
@@ -94,12 +93,11 @@ func (s *appServer) newImageBaseHandler() httpMiddleWare {
 			uid, err = s.service.NewASCIIImageSync(r.Context(), r.Body)
 		}
 		if err != nil {
-			s.writeErrorResponse(err, rw, baseResponse)
+			s.writeErrorResponse(r.Context(), err, rw)
 		} else if uid == nil {
-			s.writeErrorResponse(fmt.Errorf("internal error: could not generate uuid"), rw, baseResponse)
+			s.writeErrorResponse(r.Context(), fmt.Errorf("internal error: could not generate uuid"), rw)
 		} else {
 			response := models.NewImageResponse{
-				Response: baseResponse,
 				ImageID:  uid.String(),
 			}
 			responseBody, _ := json.Marshal(response)
@@ -110,24 +108,24 @@ func (s *appServer) newImageBaseHandler() httpMiddleWare {
 
 func (s *appServer) getImageBaseHandler() httpMiddleWare {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		baseResponse := models.Response{
-			CorrelationID: s.tryGetCorrelationID(r.Context()),
-		}
 		imageId := mux.Vars(r)["imageId"]
 		imageUID, err := uuid.Parse(imageId)
 		if err != nil {
-			s.writeErrorResponse(err, rw, baseResponse)
+			s.writeErrorResponse(r.Context(), err, rw)
 			return
 		}
-		finished, image, err := s.service.GetASCIIImage(r.Context(), imageUID)
-		if err != nil {
-			s.writeErrorResponse(err, rw, baseResponse)
+		finished, imageBytes, err := s.service.GetASCIIImage(r.Context(), imageUID)
+		// if it's an internalprocessingerror, return the error in the response body
+		if err != nil && !errors.Is(err, image.InternalProcessingError{}) {
+			s.writeErrorResponse(r.Context(), err, rw)
 			return
 		}
 		response := models.GetImageResponse{
-			Response:   baseResponse,
-			ASCIIValue: string(image),
+			ASCIIValue: string(imageBytes),
 			Finished:   finished,
+		}
+		if err != nil {
+			response.ErrorMessage = err.Error()
 		}
 		responseBody, _ := json.Marshal(response)
 		rw.Write([]byte(responseBody))
@@ -136,12 +134,9 @@ func (s *appServer) getImageBaseHandler() httpMiddleWare {
 
 func (s *appServer) getImageListBaseHandler() httpMiddleWare {
 	return func(rw http.ResponseWriter, r *http.Request) {
-		baseResponse := models.Response{
-			CorrelationID: s.tryGetCorrelationID(r.Context()),
-		}
 		imageIDList, err := s.service.GetImageList(r.Context())
 		if err != nil {
-			s.writeErrorResponse(err, rw, baseResponse)
+			s.writeErrorResponse(r.Context(), err, rw)
 			return
 		}
 		imageList := make([]string, 0, len(imageIDList))
@@ -149,7 +144,6 @@ func (s *appServer) getImageListBaseHandler() httpMiddleWare {
 			imageList = append(imageList, id.String())
 		}
 		response := models.GetImageListResponse{
-			Response:    baseResponse,
 			ImageIDList: imageList,
 		}
 		responseBody, _ := json.Marshal(response)
@@ -157,15 +151,18 @@ func (s *appServer) getImageListBaseHandler() httpMiddleWare {
 	}
 }
 
-func (s *appServer) writeErrorResponse(err error, rw http.ResponseWriter, baseResponse models.Response) {
-	if errors.Is(err, image.InternalProcessingError{}) {
+func (s *appServer) writeErrorResponse(ctx context.Context, err error, rw http.ResponseWriter) {
+	switch err.(type) {
+	case image.InternalProcessingError:
 		rw.WriteHeader(http.StatusInternalServerError)
-	} else if errors.Is(err, image.ResourceNotFoundError{}) {
+	case image.ResourceNotFoundError:
 		rw.WriteHeader(http.StatusNotFound)
-	} else {
+	case image.InvalidInputError:
+		rw.WriteHeader(http.StatusBadRequest)
+	default:
 		rw.WriteHeader(http.StatusBadRequest)
 	}
-	response := models.ErrorResponse{Response: baseResponse, ErrorMessage: err.Error()}
+	response := models.ErrorResponse{ErrorMessage: err.Error(), CorrelationID: s.tryGetCorrelationID(ctx)}
 	responseBody, _ := json.Marshal(response)
 	rw.Write(responseBody)
 }

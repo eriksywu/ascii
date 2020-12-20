@@ -12,9 +12,9 @@ COPY . .
 RUN go build -o ascii -v cmd/main.go
 
 # TODO: only supporting linux-based builds rn
-FROM SCRATCH
+FROM alpine
 WORKDIR /app
 COPY --from=gobuilder /gosrc/ascii .
 EXPOSE 8080
 
-CMD ["/app/ascii"]
+CMD ["/app/ascii", "--logToFile=true"]

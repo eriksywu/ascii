@@ -2,9 +2,9 @@ package server
 
 import (
 	"context"
+	"github.com/eriksywu/ascii/pkg/logging"
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
-	"github.com/eriksywu/ascii/pkg/logging"
 	"net/http"
 	"time"
 )
@@ -27,15 +27,17 @@ func (w httpMiddleWare) WithLoggingContext(operationName string) httpMiddleWare 
 			CorrelationID: correlationID,
 			Operation:     operationName,
 		})
+		logEntry.Infof("received api request")
 		rContext = context.WithValue(rContext, Logger, logEntry)
 		w(rw, r.WithContext(rContext))
+		logEntry.Infof("finished processing api request")
 	}
 }
 
 // WithTimeout is a simple middleware to wrap the request with a timeout context
 // this assumes the underlying base handler respects the context.Done channel from the request
 func (w httpMiddleWare) WithTimeout(timeoutSeconds int) httpMiddleWare {
-	return w.WithDynamicTimeout(func(_ *http.Request) int {return timeoutSeconds})
+	return w.WithDynamicTimeout(func(_ *http.Request) int { return timeoutSeconds })
 }
 
 // WithDynamicTimeout is a middleware to wrap the request with a timeout value based on a properties of the incoming request
@@ -55,7 +57,7 @@ func (w httpMiddleWare) WithDynamicTimeout(f func(r *http.Request) int) httpMidd
 		w(rw, r.WithContext(rContext))
 		select {
 		case <-rContext.Done():
-		case done<-struct{}{}:
+		case done <- struct{}{}:
 		}
 	}
 }
