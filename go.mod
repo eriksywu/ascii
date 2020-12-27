@@ -15,4 +15,5 @@ require (
 	github.com/stretchr/objx v0.3.0 // indirect
 	github.com/stretchr/testify v1.6.1
 	github.com/wayneashleyberry/terminal-dimensions v1.0.0 // indirect
+	k8s.io/api v0.20.1
 )
